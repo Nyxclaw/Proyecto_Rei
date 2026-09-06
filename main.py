@@ -1,6 +1,21 @@
 import time
 from rei.ai.ollama_provider import OllamaProvider
 
+
+from rei.ai.ollama_provider import OllamaProvider
+from rei.tools.tool_definitions import TOOLS
+
+
+brain = OllamaProvider()
+
+result = brain.chat_with_tools(
+    "¿Necesito apuntar una idea",
+    TOOLS,
+)
+
+print(result)
+
+
 brain = OllamaProvider()
 
 print("Rei iniciada.")

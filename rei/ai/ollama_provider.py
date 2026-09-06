@@ -146,6 +146,56 @@ class OllamaProvider:
         except (json.JSONDecodeError, KeyError, TypeError):
             yield "\nError: Ollama devolvió una respuesta inesperada."            
 
+    def chat_with_tools(self, message: str, tools: list) -> dict:
+        url = f"{self.host}/api/chat"
+
+        user_message = {
+            "role": "user",
+            "content": message,
+        }
+
+        pending_messages = self.messages + [user_message]
+
+        data = {
+            "model": self.model,
+            "messages": pending_messages,
+            "tools": tools,
+            "stream": False,
+        }
+
+        try:
+            response = requests.post(
+                url,
+                json=data,
+                timeout=60,
+            )
+
+            response.raise_for_status()
+
+            result = response.json()
+
+            return result["message"]
+
+        except requests.exceptions.ConnectionError:
+            return {
+                "error": "No se pudo conectar con Ollama."
+            }
+
+        except requests.exceptions.Timeout:
+            return {
+                "error": "Ollama tardó demasiado en responder."
+            }
+
+        except requests.exceptions.RequestException as error:
+            return {
+                "error": f"Error de comunicación con Ollama: {error}"
+            }
+
+        except (KeyError, ValueError, TypeError):
+            return {
+                "error": "Ollama devolvió una respuesta inesperada."
+            }
+
     def clear_history(self):
         self.messages = [
             {
