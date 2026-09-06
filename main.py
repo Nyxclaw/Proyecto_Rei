@@ -1,7 +1,5 @@
 import time
-
 from rei.ai.ollama_provider import OllamaProvider
-
 
 brain = OllamaProvider()
 
