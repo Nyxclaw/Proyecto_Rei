@@ -222,6 +222,39 @@ class OllamaProvider:
             }
         ]
 
+    def request_message(self, messages: list, tools: list) -> dict:
+        """Una llamada sin ejecutar herramientas ni modificar el historial."""
+        self._reset_metrics()
+        try:
+            with requests.post(
+                f"{self.host}/api/chat",
+                json={"model": self.model, "messages": messages,
+                      "tools": tools, "stream": False},
+                timeout=60,
+            ) as response:
+                response.raise_for_status()
+                result = response.json()
+            self._update_metrics(result)
+            message = result["message"]
+            if result.get("done") is not True or not isinstance(message, dict):
+                raise ValueError("Respuesta incompleta")
+            if message.get("role") != "assistant" or not isinstance(message.get("content", ""), str):
+                raise ValueError("Mensaje inválido")
+            calls = message.get("tool_calls", [])
+            if not isinstance(calls, list):
+                raise ValueError("Herramientas inválidas")
+            for call in calls:
+                function = call.get("function") if isinstance(call, dict) else None
+                if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+                    raise ValueError("Herramienta inválida")
+                if not isinstance(function.get("arguments"), dict):
+                    raise ValueError("Argumentos inválidos")
+            return message
+        except requests.exceptions.RequestException:
+            return {"error": "No se pudo completar la comunicación con Ollama."}
+        except (KeyError, TypeError, ValueError):
+            return {"error": "Ollama devolvió una respuesta incompleta o inválida."}
+
     def get_last_metrics(self) -> dict:
         return self.last_metrics.copy()
 
