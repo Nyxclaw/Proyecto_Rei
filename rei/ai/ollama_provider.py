@@ -144,7 +144,8 @@ class OllamaProvider:
             yield f"\nError de comunicación con Ollama: {error}"
 
         except (json.JSONDecodeError, KeyError, TypeError):
-            yield "\nError: Ollama devolvió una respuesta inesperada."            
+            yield "\nError: Ollama devolvió una respuesta inesperada."        
+                
 
     def chat_with_tools(self, message: str, tools: list) -> dict:
         url = f"{self.host}/api/chat"

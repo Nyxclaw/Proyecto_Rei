@@ -2,18 +2,39 @@ import time
 from rei.ai.ollama_provider import OllamaProvider
 
 
-from rei.ai.ollama_provider import OllamaProvider
+from rei.core.tool_router import ToolRouter
 from rei.tools.tool_definitions import TOOLS
 
 
 brain = OllamaProvider()
+router = ToolRouter()
 
 result = brain.chat_with_tools(
-    "¿Necesito apuntar una idea",
+    "Abre el bloc de notas.",
     TOOLS,
 )
 
+print("Respuesta del modelo:")
 print(result)
+
+tool_calls = result.get("tool_calls", [])
+
+if tool_calls:
+    for tool_call in tool_calls:
+        function = tool_call["function"]
+
+        tool_name = function["name"]
+        arguments = function["arguments"]
+
+        print(f"\nTool solicitada: {tool_name}")
+        print(f"Argumentos: {arguments}")
+
+        tool_result = router.execute(
+            tool_name,
+            arguments,
+        )
+
+        print(f"Resultado: {tool_result}")
 
 
 brain = OllamaProvider()
