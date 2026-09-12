@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import requests
 
 from rei.ai.ollama_provider import OllamaProvider
-from main import main
+from main import text_chat as main
 
 
 def response(input_tokens=100, output_tokens=20):
