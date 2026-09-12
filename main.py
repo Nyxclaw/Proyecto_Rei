@@ -10,12 +10,21 @@ brain = OllamaProvider()
 router = ToolRouter()
 
 result = brain.chat_with_tools(
-    "Abre el bloc de notas.",
-    TOOLS,
+    #"Abre el bloc de notas.",
+    #TOOLS,
 )
 
 print("Respuesta del modelo:")
 print(result)
+
+
+metrics = brain.get_last_metrics()
+
+print(
+    f"[Tokens entrada: {metrics['input_tokens']} | "
+    f"salida: {metrics['output_tokens']} | "
+    f"total: {metrics['total_tokens']}]"
+)
 
 tool_calls = result.get("tool_calls", [])
 
@@ -65,7 +74,6 @@ while True:
     print("Rei: ", end="", flush=True)
 
     for chunk in brain.chat_stream(user_message):
-
         if first_token_time is None:
             first_token_time = time.perf_counter()
 
@@ -74,6 +82,17 @@ while True:
     end_time = time.perf_counter()
 
     print()
+
+    print(
+        f"[Tokens entrada: {metrics['input_tokens']} | "
+        f"salida: {metrics['output_tokens']} | "
+        f"total: {metrics['total_tokens']}]"
+    )
+    
+    print(
+        f"[Velocidad: "
+        f"{metrics['tokens_per_second']:.2f} tokens/s]"
+    )
 
     if first_token_time is not None:
         ttft = first_token_time - start_time

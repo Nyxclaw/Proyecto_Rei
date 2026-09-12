@@ -7,9 +7,21 @@ class OllamaProvider:
         self,
         model: str = "qwen3:4b-instruct",
         host: str = "http://localhost:11434",
+
     ):
         self.model = model
         self.host = host
+
+        self.last_metrics = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "load_duration": 0,
+            "prompt_eval_duration": 0,
+            "eval_duration": 0,
+            "total_duration": 0,
+            "tokens_per_second": 0.0,
+        }
 
         self.system_prompt = (
             "Eres Rei, una asistente virtual de escritorio. "
@@ -28,6 +40,19 @@ class OllamaProvider:
                 "content": self.system_prompt,
             }
         ]
+
+        self.last_metrics = {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "load_duration": 0,
+                    "prompt_eval_duration": 0,
+                    "eval_duration": 0,
+                    "total_duration": 0,
+        }
+
+    def get_last_metrics(self) -> dict:
+        return self.last_metrics.copy()
 
     def chat(self, message: str) -> str:
         url = f"{self.host}/api/chat"
@@ -55,6 +80,19 @@ class OllamaProvider:
             response.raise_for_status()
 
             result = response.json()
+
+            input_tokens = result.get("prompt_eval_count", 0)
+            output_tokens = result.get("eval_count", 0)
+
+            self.last_metrics = {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+                "load_duration": result.get("load_duration", 0),
+                "prompt_eval_duration": result.get("prompt_eval_duration", 0),
+                "eval_duration": result.get("eval_duration", 0),
+                "total_duration": result.get("total_duration", 0),
+            }
 
             assistant_message = result["message"]["content"]
 
@@ -88,7 +126,7 @@ class OllamaProvider:
         url = f"{self.host}/api/chat"
 
         user_message = {
-          "role": "user",
+            "role": "user",
             "content": message,
         }
 
@@ -116,8 +154,7 @@ class OllamaProvider:
                 if not line:
                     continue
 
-                chunk = line.decode("utf-8")
-                data_chunk = json.loads(chunk)
+                data_chunk = json.loads(line.decode("utf-8"))
 
                 content = data_chunk.get("message", {}).get("content", "")
 
@@ -125,12 +162,14 @@ class OllamaProvider:
                     assistant_message += content
                     yield content
 
+                if data_chunk.get("done"):
+                    self._update_metrics(data_chunk)
+
             self.messages = pending_messages
 
             self.messages.append(
                 {
-                    "role": "assistant",
-                    "content": assistant_message,
+                    "role": "assistant", "content": assistant_message,
                 }
             )
 
@@ -174,6 +213,7 @@ class OllamaProvider:
             response.raise_for_status()
 
             result = response.json()
+            self._update_metrics(result)
 
             return result["message"]
 
@@ -204,3 +244,32 @@ class OllamaProvider:
                 "content": self.system_prompt,
             }
         ]
+
+    def get_last_metrics(self) -> dict:
+        return self.last_metrics.copy()
+
+    def _update_metrics(self, result: dict) -> None:
+        input_tokens = result.get("prompt_eval_count", 0)
+        output_tokens = result.get("eval_count", 0)
+
+        eval_duration = result.get("eval_duration", 0)  
+
+        if eval_duration > 0:
+            eval_seconds = eval_duration / 1_000_000_000
+            tokens_per_second = output_tokens / eval_seconds
+        else:
+            tokens_per_second = 0.0
+
+        self.last_metrics = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "load_duration": result.get("load_duration", 0),
+            "prompt_eval_duration": result.get(
+                "prompt_eval_duration",
+            0,
+        ),
+        "eval_duration": eval_duration,
+        "total_duration": result.get("total_duration", 0),
+        "tokens_per_second": tokens_per_second,
+    }
