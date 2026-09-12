@@ -17,6 +17,8 @@ class ToolRouter:
         }
 
     def execute(self, tool_name: str, arguments: dict) -> dict:
+        if not isinstance(tool_name, str) or not isinstance(arguments, dict):
+            return {"success": False, "error": "invalid_arguments"}
         tool = self.tools.get(tool_name)
 
         if tool is None:
@@ -54,6 +56,9 @@ class ToolRouter:
                 "message": str(error),
             }
 
+        if isinstance(result, dict):
+            # Un diccionario de error no debe convertirse en True por estar lleno.
+            return {**result, "success": result.get("success") is True}
         return {
             "success": bool(result),
             "result": result,

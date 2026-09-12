@@ -12,16 +12,7 @@ class OllamaProvider:
         self.model = model
         self.host = host
 
-        self.last_metrics = {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "load_duration": 0,
-            "prompt_eval_duration": 0,
-            "eval_duration": 0,
-            "total_duration": 0,
-            "tokens_per_second": 0.0,
-        }
+        self._reset_metrics()
 
         self.system_prompt = (
             "Eres Rei, una asistente virtual de escritorio. "
@@ -41,20 +32,8 @@ class OllamaProvider:
             }
         ]
 
-        self.last_metrics = {
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0,
-                    "load_duration": 0,
-                    "prompt_eval_duration": 0,
-                    "eval_duration": 0,
-                    "total_duration": 0,
-        }
-
-    def get_last_metrics(self) -> dict:
-        return self.last_metrics.copy()
-
     def chat(self, message: str) -> str:
+        self._reset_metrics()
         url = f"{self.host}/api/chat"
 
         user_message = {
@@ -81,18 +60,7 @@ class OllamaProvider:
 
             result = response.json()
 
-            input_tokens = result.get("prompt_eval_count", 0)
-            output_tokens = result.get("eval_count", 0)
-
-            self.last_metrics = {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": input_tokens + output_tokens,
-                "load_duration": result.get("load_duration", 0),
-                "prompt_eval_duration": result.get("prompt_eval_duration", 0),
-                "eval_duration": result.get("eval_duration", 0),
-                "total_duration": result.get("total_duration", 0),
-            }
+            self._update_metrics(result)
 
             assistant_message = result["message"]["content"]
 
@@ -123,6 +91,7 @@ class OllamaProvider:
             return f"Error de comunicación con Ollama: {error}"
 
     def chat_stream(self, message: str):
+        self._reset_metrics()
         url = f"{self.host}/api/chat"
 
         user_message = {
@@ -149,6 +118,7 @@ class OllamaProvider:
             response.raise_for_status()
 
             assistant_message = ""
+            completed = False
 
             for line in response.iter_lines():
                 if not line:
@@ -164,6 +134,11 @@ class OllamaProvider:
 
                 if data_chunk.get("done"):
                     self._update_metrics(data_chunk)
+                    completed = True
+                    break
+
+            if not completed:
+                raise ValueError("Stream incompleto.")
 
             self.messages = pending_messages
 
@@ -182,11 +157,12 @@ class OllamaProvider:
         except requests.exceptions.RequestException as error:
             yield f"\nError de comunicación con Ollama: {error}"
 
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError):
             yield "\nError: Ollama devolvió una respuesta inesperada."        
                 
 
     def chat_with_tools(self, message: str, tools: list) -> dict:
+        self._reset_metrics()
         url = f"{self.host}/api/chat"
 
         user_message = {
@@ -238,6 +214,7 @@ class OllamaProvider:
             }
 
     def clear_history(self):
+        self._reset_metrics()
         self.messages = [
             {
                 "role": "system",
@@ -245,31 +222,74 @@ class OllamaProvider:
             }
         ]
 
+    def request_message(self, messages: list, tools: list) -> dict:
+        """Una llamada sin ejecutar herramientas ni modificar el historial."""
+        self._reset_metrics()
+        try:
+            with requests.post(
+                f"{self.host}/api/chat",
+                json={"model": self.model, "messages": messages,
+                      "tools": tools, "stream": False},
+                timeout=60,
+            ) as response:
+                response.raise_for_status()
+                result = response.json()
+            self._update_metrics(result)
+            message = result["message"]
+            if result.get("done") is not True or not isinstance(message, dict):
+                raise ValueError("Respuesta incompleta")
+            if message.get("role") != "assistant" or not isinstance(message.get("content", ""), str):
+                raise ValueError("Mensaje inválido")
+            calls = message.get("tool_calls", [])
+            if not isinstance(calls, list):
+                raise ValueError("Herramientas inválidas")
+            for call in calls:
+                function = call.get("function") if isinstance(call, dict) else None
+                if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+                    raise ValueError("Herramienta inválida")
+                if not isinstance(function.get("arguments"), dict):
+                    raise ValueError("Argumentos inválidos")
+            return message
+        except requests.exceptions.RequestException:
+            return {"error": "No se pudo completar la comunicación con Ollama."}
+        except (KeyError, TypeError, ValueError):
+            return {"error": "Ollama devolvió una respuesta incompleta o inválida."}
+
     def get_last_metrics(self) -> dict:
         return self.last_metrics.copy()
 
-    def _update_metrics(self, result: dict) -> None:
-        input_tokens = result.get("prompt_eval_count", 0)
-        output_tokens = result.get("eval_count", 0)
-
-        eval_duration = result.get("eval_duration", 0)  
-
-        if eval_duration > 0:
-            eval_seconds = eval_duration / 1_000_000_000
-            tokens_per_second = output_tokens / eval_seconds
-        else:
-            tokens_per_second = 0.0
-
+    def _reset_metrics(self) -> None:
         self.last_metrics = {
+            "available": False,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "load_duration": 0,
+            "prompt_eval_duration": 0,
+            "eval_duration": 0,
+            "total_duration": 0,
+            "tokens_per_second": 0.0,
+        }
+
+    def _update_metrics(self, result: dict) -> None:
+        # No confundir una respuesta sin contadores con consumo cero.
+        if "prompt_eval_count" not in result or "eval_count" not in result:
+            return
+        input_tokens = result["prompt_eval_count"]
+        output_tokens = result["eval_count"]
+        eval_duration = result.get("eval_duration", 0)
+        tokens_per_second = (
+            output_tokens / (eval_duration / 1_000_000_000)
+            if eval_duration > 0 else 0.0
+        )
+        self.last_metrics = {
+            "available": True,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
             "load_duration": result.get("load_duration", 0),
-            "prompt_eval_duration": result.get(
-                "prompt_eval_duration",
-            0,
-        ),
-        "eval_duration": eval_duration,
-        "total_duration": result.get("total_duration", 0),
-        "tokens_per_second": tokens_per_second,
-    }
+            "prompt_eval_duration": result.get("prompt_eval_duration", 0),
+            "eval_duration": eval_duration,
+            "total_duration": result.get("total_duration", 0),
+            "tokens_per_second": tokens_per_second,
+        }
